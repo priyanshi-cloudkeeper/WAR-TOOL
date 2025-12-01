@@ -1,5 +1,10 @@
 # app.py
+import base64
+import re
+from pathlib import Path
+
 import streamlit as st
+import streamlit.components.v1 as components
 
 from gcp_assets import (
     GCP_LIBS_AVAILABLE,
@@ -20,8 +25,44 @@ st.title("✨ GCP Live Architecture Visualizer — Holori-style (No DB)")
 st.write(
     "This tool connects **live to GCP** using Cloud Asset Inventory and builds an "
     "interactive architecture diagram. Everything runs in memory — no database. "
-    "The interactive map itself is rendered via a local `index.html` + JS viewer."
+    "The interactive map itself is rendered via your local `index.html` + JS viewer, "
+    "embedded directly below."
 )
+
+
+def inline_icon_images_in_js(js_text: str, base_dir: Path) -> str:
+    """
+    Find all `"image": "icons/XYZ.png"` entries in the JS and replace them
+    with inline base64 data URLs so they work inside the Streamlit iframe.
+    """
+    pattern = r'"image"\s*:\s*"([^"]+)"'
+    matches = set(re.findall(pattern, js_text))
+
+    for rel_path in matches:
+        # Only touch things under icons/
+        if not rel_path.startswith("icons/"):
+            continue
+
+        img_path = (base_dir / rel_path).resolve()
+
+        if not img_path.exists():
+            # If an icon is missing, just skip it; the node will fall back
+            # to the default box style.
+            continue
+
+        try:
+            with open(img_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            data_uri = f"data:image/png;base64,{b64}"
+            js_text = js_text.replace(
+                f'"image": "{rel_path}"', f'"image": "{data_uri}"'
+            )
+        except Exception:
+            # On any error, skip this icon and leave the original path
+            continue
+
+    return js_text
+
 
 # --------------------------
 # Sidebar Controls
@@ -136,7 +177,7 @@ fetch_button = st.button("🚀 Fetch & Export Graph Data")
 if not fetch_button:
     st.info(
         "Configure the connection & click **Fetch & Export Graph Data**.\n\n"
-        "Then open `index.html` in this folder to view the interactive map."
+        "The interactive map will appear below using your existing `index.html` UI."
     )
     st.stop()
 
@@ -201,11 +242,43 @@ js_path = export_graph_to_js(nodes, edges, "graphData.js")
 
 st.success(
     f"Graph data exported to `{js_path}`.\n\n"
-    "Now open **`index.html`** (in the same WAR-TOOL folder) in your browser to see the interactive diagram."
+    "Loading the interactive diagram below using your existing `index.html` + `network.js`, "
+    "with local icons inlined so they work inside Streamlit."
 )
 
-st.code(
-    "cd /Users/priyanshityagi/Documents/Work/GCP/WAR-TOOL\n"
-    "open index.html    # or double-click index.html in Finder",
-    language="bash",
-)
+# --------------------------
+# Embed existing index.html in Streamlit
+# --------------------------
+base_dir = Path(__file__).parent
+
+index_html_path = base_dir / "index.html"
+graph_js_path = base_dir / "graphData.js"
+network_js_path = base_dir / "network.js"
+
+try:
+    index_html = index_html_path.read_text(encoding="utf-8")
+    graph_js = graph_js_path.read_text(encoding="utf-8")
+    network_js = network_js_path.read_text(encoding="utf-8")
+
+    # Inline icons as base64 in graphData.js
+    graph_js = inline_icon_images_in_js(graph_js, base_dir)
+
+    # Inline the two local scripts so the browser doesn't have to fetch files from disk
+    index_html = index_html.replace(
+        '<script src="graphData.js"></script>',
+        f"<script>\n{graph_js}\n</script>",
+    )
+    index_html = index_html.replace(
+        '<script src="network.js"></script>',
+        f"<script>\n{network_js}\n</script>",
+    )
+
+    # Render the full HTML (all your styling & controls preserved)
+    components.html(index_html, height=800, scrolling=True)
+
+except Exception as e:
+    st.error(f"Failed to load local HTML/JS viewer: {e}")
+    st.info(
+        "If needed, you can still open `index.html` manually in the project folder "
+        "to debug the static viewer."
+    )

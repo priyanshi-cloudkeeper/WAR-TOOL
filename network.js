@@ -1,5 +1,4 @@
 // network.js
-
 // Global vis objects
 let network;
 let nodesDS;
@@ -7,6 +6,14 @@ let edgesDS;
 
 // For tiered layout
 let currentHorizontalSpacing = 160;
+
+// Details panel DOM refs
+let detailPanelEl;
+let detailTitleEl;
+let detailSubtitleEl;
+let detailBodyEl;
+let detailIconEl;
+let detailCloseEl;
 
 // -------------------------------
 // Helper: classify nodes by id
@@ -22,6 +29,9 @@ function classifyNode(node) {
   }
   if (id.startsWith("type::")) {
     return { level: 2, group: "type" };
+  }
+  if (id.startsWith("agg::")) {
+    return { level: 3, group: "aggregate" };
   }
   // Everything else is a concrete resource
   return { level: 3, group: "resource" };
@@ -60,6 +70,15 @@ function decorateNodes(rawNodes) {
       };
       base.font.size = base.font.size || 12;
       base.margin = base.margin || 8;
+    } else if (info.group === "aggregate") {
+      base.shape = base.shape || "box";
+      base.color = base.color || {
+        background: "#fff9db",
+        border: "#f59f00",
+        highlight: { background: "#fff3bf", border: "#e67700" },
+      };
+      base.font.size = base.font.size || 11;
+      base.margin = base.margin || 6;
     } else {
       // resource instances
       base.shape = base.shape || "box";
@@ -155,6 +174,131 @@ function enableForceLayout() {
 }
 
 // -------------------------------
+// Details panel helpers
+// -------------------------------
+function initDetailsPanel() {
+  detailPanelEl = document.getElementById("node-detail-panel");
+  detailTitleEl = document.getElementById("node-detail-title");
+  detailSubtitleEl = document.getElementById("node-detail-subtitle");
+  detailBodyEl = document.getElementById("node-detail-body");
+  detailIconEl = document.getElementById("node-detail-icon");
+  detailCloseEl = document.getElementById("node-detail-close");
+
+  if (detailCloseEl && detailPanelEl) {
+    detailCloseEl.addEventListener("click", () => {
+      hideNodeDetails();
+    });
+  }
+}
+
+function hideNodeDetails() {
+  if (!detailPanelEl) return;
+  detailPanelEl.style.display = "none";
+}
+
+// Main function to render details for either a resource or an aggregate node
+function showNodeDetails(node) {
+  if (!detailPanelEl || !detailTitleEl || !detailBodyEl) return;
+
+  const isAggregate = node.group === "aggregate";
+
+  // Title & subtitle
+  if (isAggregate) {
+    const typeShort = (node.assetType || "").split("/").pop() || "Resources";
+    detailTitleEl.textContent = `More ${typeShort}`;
+    detailSubtitleEl.textContent = `Project: ${node.projectId || ""}`;
+  } else {
+    detailTitleEl.textContent = node.displayName || node.label || "Resource";
+    detailSubtitleEl.textContent = node.assetType || "";
+  }
+
+  // Icon (for real resources only; aggregates and virtual rows don't have icons)
+  if (detailIconEl) {
+    if (!isAggregate && node.shape === "image" && node.image) {
+      detailIconEl.style.display = "block";
+      detailIconEl.src = node.image;
+    } else {
+      detailIconEl.style.display = "none";
+      detailIconEl.src = "";
+    }
+  }
+
+  // General section
+  const generalRows = [
+    { label: "Project", value: node.projectId },
+    { label: "Location", value: node.location },
+    { label: "Asset type", value: node.assetType },
+    { label: "Full name", value: node.fullName },
+  ];
+
+  const generalHtml = generalRows
+    .filter((r) => r.value)
+    .map(
+      (r) =>
+        `<div class="node-detail-kv-row">
+           <div class="node-detail-kv-label">${r.label}</div>
+           <div class="node-detail-kv-value">${r.value}</div>
+         </div>`
+    )
+    .join("");
+
+  // Extras (for aggregate "+ N more" nodes)
+  let extrasHtml = "";
+  if (isAggregate && node.extraCount && Array.isArray(node.extraResources)) {
+    const items = node.extraResources
+      .map((res, idx) => {
+        const name = res.displayName || res.fullName || "(unnamed)";
+        const loc =
+          res.location && res.location !== "(global/unknown)"
+            ? ` <span style="color:#868e96">(${res.location})</span>`
+            : "";
+        // Clicking this calls showExtraResourceDetails with the aggregate node id + index
+        return `<li>
+          <button type="button"
+                  class="extra-link"
+                  onclick="showExtraResourceDetails('${node.id}', ${idx})">
+            ${name}${loc}
+          </button>
+        </li>`;
+      })
+      .join("");
+
+    extrasHtml =
+      `<div class="node-detail-section-title">Additional resources (${node.extraCount})</div>` +
+      `<ul style="padding-left:1.1rem;margin:0 0 0.5rem;">${items}</ul>`;
+  }
+
+  detailBodyEl.innerHTML =
+    (generalHtml
+      ? `<div class="node-detail-section-title">General</div>${generalHtml}`
+      : "") + extrasHtml;
+
+  detailPanelEl.style.display = "block";
+}
+
+// Called when user clicks one of the "additional resources" items
+function showExtraResourceDetails(aggNodeId, index) {
+  const aggNode = nodesDS.get(aggNodeId);
+  if (!aggNode || !Array.isArray(aggNode.extraResources)) return;
+
+  const res = aggNode.extraResources[index];
+  if (!res) return;
+
+  // Build a "virtual" node-like object for this extra resource
+  const virtualNode = {
+    group: "resource",
+    displayName: res.displayName || res.fullName || "(unnamed)",
+    fullName: res.fullName,
+    location: res.location,
+    projectId: aggNode.projectId,
+    assetType: aggNode.assetType,
+    // no icon for now
+  };
+
+  showNodeDetails(virtualNode);
+}
+
+// -------------------------------
 // Initialize network
 // -------------------------------
 function initNetwork() {
@@ -245,14 +389,25 @@ function initNetwork() {
     zoomLabel.textContent = `Zoom: ${Math.round(scale * 100)}%`;
   });
 
-  // Simple node focus on click (like Holori)
+  // Simple node focus on click + details panel
   network.on("click", (params) => {
     if (params.nodes.length === 1) {
       const nodeId = params.nodes[0];
+      const node = nodesDS.get(nodeId);
+
       network.focus(nodeId, {
         scale: 1.2,
         animation: { duration: 400, easingFunction: "easeInOutQuad" },
       });
+
+      if (node && (node.group === "resource" || node.group === "aggregate")) {
+        showNodeDetails(node);
+      } else {
+        hideNodeDetails();
+      }
+    } else {
+      // Clicked on empty space – hide panel
+      hideNodeDetails();
     }
   });
 
@@ -269,6 +424,7 @@ function initNetwork() {
   });
 
   setupControls();
+  initDetailsPanel();
 }
 
 // -------------------------------
@@ -357,3 +513,4 @@ function setupControls() {
 // Boot
 // -------------------------------
 window.addEventListener("DOMContentLoaded", initNetwork);
+

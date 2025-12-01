@@ -132,6 +132,7 @@ def build_graph_data(
                 rows = type_subset.head(max_resources_per_type)
                 extra = max(0, len(type_subset) - len(rows))
 
+                # Concrete resource nodes (sampled)
                 for _, row in rows.iterrows():
                     full_name = row["Full name"]
                     if full_name in added_ids:
@@ -151,6 +152,12 @@ def build_graph_data(
                             f"Location: {location}<br>"
                             f"Full name: {full_name}"
                         ),
+                        # extra fields used by JS panel
+                        "assetType": asset_type,
+                        "projectId": project,
+                        "location": location,
+                        "fullName": full_name,
+                        "displayName": display,
                     }
 
                     if use_icons:
@@ -163,9 +170,22 @@ def build_graph_data(
                     added_ids.add(full_name)
                     edges.append({"from": type_node_id, "to": full_name})
 
+                # Aggregated "+ N more" node with list of extra resources
                 if extra > 0:
                     agg_id = f"agg::{project}::{asset_type}"
                     if agg_id not in added_ids:
+                        # all rows beyond the sampled ones
+                        extra_rows = type_subset.iloc[max_resources_per_type:]
+                        extra_resources = []
+                        for _, er in extra_rows.iterrows():
+                            extra_resources.append(
+                                {
+                                    "displayName": er["Display name"],
+                                    "fullName": er["Full name"],
+                                    "location": er["Location"],
+                                }
+                            )
+
                         nodes.append(
                             {
                                 "id": agg_id,
@@ -173,9 +193,15 @@ def build_graph_data(
                                 "title": (
                                     f"{extra} more {asset_type} resources in project {project}"
                                 ),
+                                # metadata for details panel
+                                "assetType": asset_type,
+                                "projectId": project,
+                                "extraCount": extra,
+                                "extraResources": extra_resources,
                             }
                         )
                         added_ids.add(agg_id)
+
                     edges.append({"from": type_node_id, "to": agg_id})
 
         else:  # "Project → Resource Type"
