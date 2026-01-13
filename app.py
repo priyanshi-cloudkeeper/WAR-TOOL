@@ -21,14 +21,11 @@ from graph_builder import (
 
 
 st.set_page_config(page_title="✨ GCP Live Architecture Visualizer", layout="wide")
-st.title("✨ GCP Live Architecture Visualizer — Holori-style (No DB)")
+st.title("✨ GCP Live Architecture Visualizer")
 st.write(
     "This tool connects **live to GCP** using Cloud Asset Inventory and builds an "
-    "interactive architecture diagram. Everything runs in memory — no database. "
-    "The interactive map itself is rendered via your local `index.html` + JS viewer, "
-    "embedded directly below."
-)
 
+)
 
 def inline_icon_images_in_js(js_text: str, base_dir: Path) -> str:
     """
@@ -90,8 +87,8 @@ with st.sidebar:
 
     scope = st.text_input(
         "Scope (parent)",
-        value="organizations/123456789",
-        help="Examples: organizations/123456789, folders/456789, projects/my-project-id",
+        value="organizations/org-id",
+        help="Examples: organizations/org-id, folders/folder-id, projects/my-project-id",
     )
 
     max_assets = st.slider(
@@ -152,27 +149,8 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.markdown("**Legend — Categories**")
-    for cat, col in CATEGORY_COLORS.items():
-        st.markdown(
-            f'<div style="display:flex;align-items:center;margin-bottom:4px;">'
-            f'<div style="width:14px;height:14px;border-radius:3px;'
-            f'background:{col};margin-right:6px;border:1px solid #aaa;"></div>'
-            f'<span style="font-size:13px;">{cat}</span></div>',
-            unsafe_allow_html=True,
-        )
 
-    st.markdown("**Legend — Status border**")
-    for status_name, col in STATUS_BORDERS.items():
-        st.markdown(
-            f'<div style="display:flex;align-items:center;margin-bottom:4px;">'
-            f'<div style="width:14px;height:14px;border-radius:3px;'
-            f'border:2px solid {col};margin-right:6px;"></div>'
-            f'<span style="font-size:13px;">{status_name}</span></div>',
-            unsafe_allow_html=True,
-        )
-
-fetch_button = st.button("🚀 Fetch & Export Graph Data")
+fetch_button = st.button("Fetch & Export Graph Data")
 
 if not fetch_button:
     st.info(
@@ -240,11 +218,11 @@ nodes, edges = build_graph_data(
 
 js_path = export_graph_to_js(nodes, edges, "graphData.js")
 
-st.success(
-    f"Graph data exported to `{js_path}`.\n\n"
-    "Loading the interactive diagram below using your existing `index.html` + `network.js`, "
-    "with local icons inlined so they work inside Streamlit."
-)
+# st.success(
+#     f"Graph data exported to `{js_path}`.\n\n"
+#     "Loading the interactive diagram below using your existing `index.html` + `network.js`, "
+#     "with local icons inlined so they work inside Streamlit."
+# )
 
 # --------------------------
 # Embed existing index.html in Streamlit
@@ -278,7 +256,7 @@ try:
 
 except Exception as e:
     st.error(f"Failed to load local HTML/JS viewer: {e}")
-    st.info(
-        "If needed, you can still open `index.html` manually in the project folder "
-        "to debug the static viewer."
-    )
+    # st.info(
+    #     "If needed, you can still open `index.html` manually in the project folder "
+    #     "to debug the static viewer."
+    # )

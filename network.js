@@ -15,6 +15,9 @@ let detailBodyEl;
 let detailIconEl;
 let detailCloseEl;
 
+// Highlight state
+let highlightedNodeId = null;
+
 // -------------------------------
 // Helper: classify nodes by id
 // -------------------------------
@@ -48,48 +51,105 @@ function decorateNodes(rawNodes) {
     base.level = info.level;
     base.group = info.group;
 
-    // Default styles (can be overridden by existing node props)
     if (!base.font) base.font = {};
     base.font.face = base.font.face || "Inter";
+    base.font.size = base.font.size || 11;
+
+    // Add title tooltip (name + type)
+    const dn = base.displayName || base.label || base.name || "";
+    const at = base.assetType || "";
+    if (!base.title) {
+      base.title = dn || at ? `${dn || "(unnamed)"}\n${at}` : "";
+    }
+
+    // Subtle rounded boxes
+    base.shapeProperties = base.shapeProperties || { borderRadius: 5 };
+
+    // If an icon is present, respect it (image nodes)
+    const hasImage = !!base.image;
 
     if (info.group === "scope" || info.group === "project") {
-      base.shape = base.shape || "box";
-      base.color = base.color || {
-        background: "#e7f1ff",
-        border: "#4c6ef5",
-        highlight: { background: "#d0e1ff", border: "#364fc7" },
-      };
-      base.font.size = base.font.size || 13;
+      base.shape = hasImage ? (base.shape || "image") : (base.shape || "box");
+      base.size = base.size || 35;
+      base.mass = base.mass || 5;
+      base.color =
+        base.color || {
+          background: "#e7f1ff",
+          border: "#4c6ef5",
+          highlight: { background: "#d0e1ff", border: "#364fc7" },
+        };
       base.margin = base.margin || 10;
+      base.widthConstraint = base.widthConstraint || { minimum: 120, maximum: 220 };
+      base.shadow = {
+        enabled: true,
+        size: 12,
+        x: 0,
+        y: 3,
+        color: "rgba(76, 110, 245, 0.25)",
+      };
     } else if (info.group === "type") {
-      base.shape = base.shape || "box";
-      base.color = base.color || {
-        background: "#fff4e6",
-        border: "#f08c00",
-        highlight: { background: "#ffe3bf", border: "#d9480f" },
-      };
-      base.font.size = base.font.size || 12;
+      base.shape = hasImage ? (base.shape || "image") : (base.shape || "box");
+      base.size = base.size || 30;
+      base.mass = base.mass || 4;
+      base.color =
+        base.color || {
+          background: "#fff4e6",
+          border: "#f08c00",
+          highlight: { background: "#ffe3bf", border: "#d9480f" },
+        };
       base.margin = base.margin || 8;
-    } else if (info.group === "aggregate") {
-      base.shape = base.shape || "box";
-      base.color = base.color || {
-        background: "#fff9db",
-        border: "#f59f00",
-        highlight: { background: "#fff3bf", border: "#e67700" },
+      base.widthConstraint = base.widthConstraint || { minimum: 110, maximum: 200 };
+      base.shadow = {
+        enabled: true,
+        size: 10,
+        x: 0,
+        y: 3,
+        color: "rgba(240, 140, 0, 0.25)",
       };
+    } else if (info.group === "aggregate") {
+      base.shape = "box";
+      base.size = base.size || 26;
+      base.mass = base.mass || 3;
+      base.color =
+        base.color || {
+          background: "#fff9db",
+          border: "#f59f00",
+          highlight: { background: "#fff3bf", border: "#e67700" },
+        };
       base.font.size = base.font.size || 11;
       base.margin = base.margin || 6;
+      base.widthConstraint = base.widthConstraint || { minimum: 100, maximum: 200 };
+      base.shadow = {
+        enabled: true,
+        size: 8,
+        x: 0,
+        y: 2,
+        color: "rgba(245, 159, 0, 0.25)",
+      };
     } else {
       // resource instances
-      base.shape = base.shape || "box";
-      base.color = base.color || {
-        background: "#e6f4ea",
-        border: "#2f9e44",
-        highlight: { background: "#d3f9d8", border: "#2b8a3e" },
-      };
-      base.font.size = base.font.size || 11;
+      base.shape = hasImage ? (base.shape || "image") : (base.shape || "box");
+      base.size = base.size || (hasImage ? 32 : 24);
+      base.mass = base.mass || 1.8;
+      base.color =
+        base.color || {
+          background: "#e6f4ea",
+          border: "#2f9e44",
+          highlight: { background: "#d3f9d8", border: "#2b8a3e" },
+        };
       base.margin = base.margin || 6;
+      base.widthConstraint = base.widthConstraint || { minimum: 90, maximum: 180 };
+      base.shadow = {
+        enabled: true,
+        size: 8,
+        x: 0,
+        y: 2,
+        color: "rgba(46, 204, 113, 0.24)",
+      };
     }
+
+    // Keep a copy of original color for highlighting logic
+    base._baseColor = base.color;
 
     return base;
   });
@@ -98,7 +158,7 @@ function decorateNodes(rawNodes) {
 // -------------------------------
 // Tiered layout (Holori-style)
 // -------------------------------
-function applyTieredLayout(spacingX = 160, spacingY = 160) {
+function applyTieredLayout(spacingX = 160, spacingY = 140) {
   const levels = {};
   nodesDS.forEach((node) => {
     const level = node.level || 0;
@@ -126,6 +186,7 @@ function applyTieredLayout(spacingX = 160, spacingY = 160) {
         id,
         x,
         y,
+        physics: false,
         fixed: { x: true, y: true },
       });
     });
@@ -139,7 +200,7 @@ function enableForceLayout() {
   // Unfix positions so physics can move them
   nodesDS.forEach((node) => {
     if (node.fixed) {
-      nodesDS.update({ id: node.id, fixed: false });
+      nodesDS.update({ id: node.id, fixed: false, physics: true });
     }
   });
 
@@ -148,23 +209,24 @@ function enableForceLayout() {
       hierarchical: {
         enabled: false,
       },
+      improvedLayout: true,
     },
     physics: {
       enabled: true,
       solver: "forceAtlas2Based",
       forceAtlas2Based: {
-        gravitationalConstant: -35,
-        centralGravity: 0.005,
-        springLength: 130,
-        springConstant: 0.18,
-        damping: 0.4,
+        gravitationalConstant: -40,
+        centralGravity: 0.02,
+        springLength: 150,
+        springConstant: 0.16,
+        damping: 0.45,
         avoidOverlap: 0.7,
       },
       stabilization: {
         enabled: true,
         iterations: 300,
       },
-      maxVelocity: 20,
+      maxVelocity: 25,
       minVelocity: 0.5,
       timestep: 0.35,
     },
@@ -187,6 +249,7 @@ function initDetailsPanel() {
   if (detailCloseEl && detailPanelEl) {
     detailCloseEl.addEventListener("click", () => {
       hideNodeDetails();
+      clearActiveNodeHighlight();
     });
   }
 }
@@ -196,43 +259,30 @@ function hideNodeDetails() {
   detailPanelEl.style.display = "none";
 }
 
-// Main function to render details for either a resource or an aggregate node
-function showNodeDetails(node) {
-  if (!detailPanelEl || !detailTitleEl || !detailBodyEl) return;
+// Helper to safely stringify labels object into chips HTML
+function buildLabelsChips(labels) {
+  if (!labels || typeof labels !== "object") return "";
+  const entries = Object.entries(labels);
+  if (!entries.length) return "";
 
-  const isAggregate = node.group === "aggregate";
+  const chips = entries
+    .slice(0, 15)
+    .map(
+      ([k, v]) =>
+        `<span class="node-detail-chip">${k}: ${String(v)}</span>`
+    )
+    .join("");
 
-  // Title & subtitle
-  if (isAggregate) {
-    const typeShort = (node.assetType || "").split("/").pop() || "Resources";
-    detailTitleEl.textContent = `More ${typeShort}`;
-    detailSubtitleEl.textContent = `Project: ${node.projectId || ""}`;
-  } else {
-    detailTitleEl.textContent = node.displayName || node.label || "Resource";
-    detailSubtitleEl.textContent = node.assetType || "";
-  }
+  return chips
+    ? `<div class="node-detail-section-title">Labels</div>
+       <div class="node-detail-chip-row">${chips}</div>`
+    : "";
+}
 
-  // Icon (for real resources only; aggregates and virtual rows don't have icons)
-  if (detailIconEl) {
-    if (!isAggregate && node.shape === "image" && node.image) {
-      detailIconEl.style.display = "block";
-      detailIconEl.src = node.image;
-    } else {
-      detailIconEl.style.display = "none";
-      detailIconEl.src = "";
-    }
-  }
-
-  // General section
-  const generalRows = [
-    { label: "Project", value: node.projectId },
-    { label: "Location", value: node.location },
-    { label: "Asset type", value: node.assetType },
-    { label: "Full name", value: node.fullName },
-  ];
-
-  const generalHtml = generalRows
-    .filter((r) => r.value)
+// Helper for building a simple KV section
+function buildKVSection(title, rows) {
+  const htmlRows = rows
+    .filter((r) => r && r.value)
     .map(
       (r) =>
         `<div class="node-detail-kv-row">
@@ -242,22 +292,149 @@ function showNodeDetails(node) {
     )
     .join("");
 
+  if (!htmlRows) return "";
+  return `<div class="node-detail-section-title">${title}</div>${htmlRows}`;
+}
+
+// Main function to render details for either a resource or an aggregate node
+function showNodeDetails(node) {
+  if (!detailPanelEl || !detailTitleEl || !detailBodyEl) return;
+  if (!node) return;
+
+  const isAggregate = node.group === "aggregate";
+  const meta = node.metadata || {};
+  const labels = node.labels || meta.labels || {};
+  const state = node.state || meta.state || meta.status;
+  const shortType =
+    (node.assetType || "").split("/").pop() ||
+    (isAggregate ? "Resources" : "Resource");
+
+  // Title & subtitle
+  if (isAggregate) {
+    detailTitleEl.textContent = `More ${shortType}`;
+    detailSubtitleEl.textContent = node.projectId
+      ? `Project: ${node.projectId}`
+      : node.assetType || "";
+  } else {
+    const displayName =
+      node.displayName || node.label || node.name || "Resource";
+    detailTitleEl.textContent = displayName;
+    detailSubtitleEl.textContent = node.assetType || "";
+  }
+
+  // Icon (for real resources only)
+  if (detailIconEl) {
+    if (!isAggregate && node.image) {
+      detailIconEl.style.display = "block";
+      detailIconEl.src = node.image;
+    } else {
+      detailIconEl.style.display = "none";
+      detailIconEl.src = "";
+    }
+  }
+
+  // Top chips (type, group, state)
+  const chips = [];
+
+  if (shortType) {
+    chips.push(`<span class="node-detail-chip">${shortType}</span>`);
+  }
+
+  if (node.group === "resource") {
+    chips.push(`<span class="node-detail-chip">Resource instance</span>`);
+  } else if (node.group === "type") {
+    chips.push(`<span class="node-detail-chip">Resource type</span>`);
+  } else if (node.group === "project") {
+    chips.push(`<span class="node-detail-chip">Project</span>`);
+  } else if (node.group === "scope") {
+    chips.push(`<span class="node-detail-chip">Scope</span>`);
+  } else if (node.group === "aggregate") {
+    chips.push(`<span class="node-detail-chip">Group of resources</span>`);
+  }
+
+  if (state) {
+    chips.push(
+      `<span class="node-detail-chip">State: ${String(state)}</span>`
+    );
+  }
+
+  const chipsHtml = chips.length
+    ? `<div class="node-detail-chip-row">${chips.join("")}</div>`
+    : "";
+
+  // General section
+  const generalRows = [
+    { label: "Project", value: node.projectId || meta.projectId },
+    { label: "Location", value: node.location || meta.location },
+    { label: "Asset type", value: node.assetType },
+    { label: "Full name", value: node.fullName || meta.fullName },
+  ];
+  const generalHtml = buildKVSection("General", generalRows);
+
+  // Identifiers section
+  const identifiersRows = [
+    { label: "ID", value: node.id },
+    { label: "Name", value: node.name || meta.name },
+    {
+      label: "Short name",
+      value: node.displayName || node.label || meta.displayName,
+    },
+  ];
+  const identifiersHtml = buildKVSection("Identifiers", identifiersRows);
+
+  // Networking section (best-effort)
+  const networkingRows = [
+    { label: "Network", value: node.network || meta.network },
+    { label: "Subnetwork", value: node.subnetwork || meta.subnetwork },
+    { label: "Region", value: node.region || meta.region },
+    { label: "IP", value: node.ip || meta.ip },
+  ];
+  const networkingHtml = buildKVSection("Networking", networkingRows);
+
+  // IAM / security section (if present)
+  const iamMembers = node.iamMembers || meta.iamMembers;
+  const serviceAccount =
+    node.serviceAccount || meta.serviceAccount || meta.saEmail;
+
+  const iamRows = [
+    { label: "Service account", value: serviceAccount },
+    {
+      label: "IAM members",
+      value: Array.isArray(iamMembers)
+        ? `${iamMembers.length} member(s)`
+        : undefined,
+    },
+  ];
+  const iamHtml = buildKVSection("IAM & Security", iamRows);
+
+  // Labels chips
+  const labelsHtml = buildLabelsChips(labels);
+
   // Extras (for aggregate "+ N more" nodes)
   let extrasHtml = "";
   if (isAggregate && node.extraCount && Array.isArray(node.extraResources)) {
     const items = node.extraResources
       .map((res, idx) => {
-        const name = res.displayName || res.fullName || "(unnamed)";
+        const name =
+          res.displayName || res.name || res.fullName || "(unnamed)";
         const loc =
           res.location && res.location !== "(global/unknown)"
-            ? ` <span style="color:#868e96">(${res.location})</span>`
+            ? ` <span style="color:#9ca3af">(${res.location})</span>`
             : "";
-        // Clicking this calls showExtraResourceDetails with the aggregate node id + index
-        return `<li>
+        const typeShort =
+          (res.assetType || node.assetType || "")
+            .split("/")
+            .pop() || "";
+
+        const typeFragment = typeShort
+          ? `<span style="color:#6b7280;font-size:0.72rem;margin-left:4px;">[${typeShort}]</span>`
+          : "";
+
+        return `<li style="margin-bottom:0.15rem;">
           <button type="button"
                   class="extra-link"
                   onclick="showExtraResourceDetails('${node.id}', ${idx})">
-            ${name}${loc}
+            ${name}${loc}${typeFragment}
           </button>
         </li>`;
       })
@@ -269,9 +446,13 @@ function showNodeDetails(node) {
   }
 
   detailBodyEl.innerHTML =
-    (generalHtml
-      ? `<div class="node-detail-section-title">General</div>${generalHtml}`
-      : "") + extrasHtml;
+    chipsHtml +
+    generalHtml +
+    identifiersHtml +
+    networkingHtml +
+    iamHtml +
+    labelsHtml +
+    extrasHtml;
 
   detailPanelEl.style.display = "block";
 }
@@ -286,16 +467,113 @@ function showExtraResourceDetails(aggNodeId, index) {
 
   // Build a "virtual" node-like object for this extra resource
   const virtualNode = {
+    id: res.id || `${aggNodeId}::extra::${index}`,
     group: "resource",
-    displayName: res.displayName || res.fullName || "(unnamed)",
+    displayName: res.displayName || res.name || res.fullName || "(unnamed)",
+    label: res.displayName || res.name || res.fullName,
     fullName: res.fullName,
-    location: res.location,
-    projectId: aggNode.projectId,
-    assetType: aggNode.assetType,
-    // no icon for now
+    name: res.name,
+    location: res.location || aggNode.location,
+    projectId: res.projectId || aggNode.projectId,
+    assetType: res.assetType || aggNode.assetType,
+    state: res.state || res.status,
+    labels: res.labels,
+    metadata: res.metadata,
+    image: res.image,
   };
 
   showNodeDetails(virtualNode);
+  setActiveNodeHighlight(aggNodeId); // keep highlight on the group
+}
+
+// -------------------------------
+// Highlighting helpers
+// -------------------------------
+function setActiveNodeHighlight(nodeId) {
+  highlightedNodeId = nodeId;
+
+  const connectedNodes = network.getConnectedNodes(nodeId);
+  const connectedEdges = network.getConnectedEdges(nodeId);
+
+  const allNodes = nodesDS.get();
+  const nodeUpdates = [];
+
+  allNodes.forEach((node) => {
+    const isMain = node.id === nodeId;
+    const isNeighbor = connectedNodes.includes(node.id);
+    const baseColor = node._baseColor || node.color;
+
+    if (!node._baseColor) {
+      node._baseColor = baseColor;
+    }
+
+    const newColor = { ...baseColor };
+
+    if (!isMain && !isNeighbor) {
+      // fade non-neighbors
+      newColor.opacity = 0.18;
+      nodeUpdates.push({
+        id: node.id,
+        color: newColor,
+        font: { ...node.font, color: "#9ca3af" },
+      });
+    } else {
+      newColor.opacity = 1.0;
+      nodeUpdates.push({
+        id: node.id,
+        color: newColor,
+        font: { ...node.font, color: "#111827" },
+      });
+    }
+  });
+
+  nodesDS.update(nodeUpdates);
+
+  // Edge highlighting
+  const allEdges = edgesDS.get();
+  const edgeUpdates = allEdges.map((edge) => {
+    const isConnected = connectedEdges.includes(edge.id);
+    if (!edge._baseColor) edge._baseColor = edge.color || { color: "#ced4da" };
+
+    const color = isConnected
+      ? { ...edge._baseColor, color: "#94a3b8" }
+      : { ...edge._baseColor, color: "rgba(206, 212, 218, 0.2)" };
+
+    return {
+      id: edge.id,
+      color,
+      width: isConnected ? 1.6 : 0.8,
+    };
+  });
+  edgesDS.update(edgeUpdates);
+}
+
+function clearActiveNodeHighlight() {
+  highlightedNodeId = null;
+
+  const allNodes = nodesDS.get();
+  const nodeUpdates = allNodes.map((node) => {
+    const baseColor = node._baseColor || node.color;
+    const color = { ...baseColor, opacity: 1.0 };
+
+    return {
+      id: node.id,
+      color,
+      font: { ...node.font, color: "#111827" },
+    };
+  });
+  nodesDS.update(nodeUpdates);
+
+  const allEdges = edgesDS.get();
+  const edgeUpdates = allEdges.map((edge) => {
+    const base = edge._baseColor || edge.color || { color: "#ced4da" };
+    return {
+      id: edge.id,
+      color: base,
+      width: 1,
+    };
+  });
+  edgesDS.update(edgeUpdates);
 }
 
 // -------------------------------
@@ -303,7 +581,6 @@ function showExtraResourceDetails(aggNodeId, index) {
 // -------------------------------
 function initNetwork() {
   if (!Array.isArray(RAW_NODES) || !Array.isArray(RAW_EDGES)) {
-    // Fallback if graphData.js wasn't generated.
     console.error("RAW_NODES / RAW_EDGES not defined.");
     return;
   }
@@ -331,26 +608,29 @@ function initNetwork() {
       solver: "forceAtlas2Based",
       forceAtlas2Based: {
         gravitationalConstant: -35,
-        centralGravity: 0.01,
+        centralGravity: 0.015,
         springLength: 140,
-        springConstant: 0.18,
-        damping: 0.5,
-        avoidOverlap: 0.6,
+        springConstant: 0.16,
+        damping: 0.52,
+        avoidOverlap: 0.65,
       },
       stabilization: {
         enabled: true,
-        iterations: 200,
+        iterations: 220,
       },
     },
     edges: {
       smooth: {
         type: "dynamic",
-        roundness: 0.3,
+        roundness: 0.25,
       },
       width: 1,
+      selectionWidth: 2,
+      hoverWidth: 1.5,
       color: {
         color: "#ced4da",
-        highlight: "#adb5bd",
+        highlight: "#94a3b8",
+        hover: "#94a3b8",
       },
       arrows: {
         to: { enabled: false },
@@ -359,11 +639,16 @@ function initNetwork() {
     nodes: {
       borderWidth: 1,
       borderWidthSelected: 2,
-      shadow: {
-        enabled: false,
+      chosen: {
+        node(values) {
+          values.borderWidth = 2.5;
+          values.size = values.size * 1.05;
+        },
       },
       font: {
         face: "Inter",
+        size: 11,
+        color: "#111827",
       },
     },
     interaction: {
@@ -377,8 +662,9 @@ function initNetwork() {
 
   network = new vis.Network(container, data, options);
 
+
   // Apply initial tiered layout
-  applyTieredLayout(currentHorizontalSpacing, 160);
+  applyTieredLayout(currentHorizontalSpacing, 140);
   network.fit({ animation: { duration: 600, easingFunction: "easeInOutQuad" } });
   network.setOptions({ physics: { enabled: true } });
 
@@ -389,7 +675,7 @@ function initNetwork() {
     zoomLabel.textContent = `Zoom: ${Math.round(scale * 100)}%`;
   });
 
-  // Simple node focus on click + details panel
+  // Node click: focus, highlight, details
   network.on("click", (params) => {
     if (params.nodes.length === 1) {
       const nodeId = params.nodes[0];
@@ -400,13 +686,16 @@ function initNetwork() {
         animation: { duration: 400, easingFunction: "easeInOutQuad" },
       });
 
+      setActiveNodeHighlight(nodeId);
+
       if (node && (node.group === "resource" || node.group === "aggregate")) {
         showNodeDetails(node);
       } else {
         hideNodeDetails();
       }
     } else {
-      // Clicked on empty space – hide panel
+      // Clicked on empty space – clear highlight & panel
+      clearActiveNodeHighlight();
       hideNodeDetails();
     }
   });
@@ -417,6 +706,7 @@ function initNetwork() {
       const nodeId = params.nodes[0];
       if (network.isCluster(nodeId)) {
         network.openCluster(nodeId);
+        clearActiveNodeHighlight();
       } else {
         clusterResourcesAround(nodeId);
       }
@@ -477,11 +767,13 @@ function setupControls() {
         if (radio.value === "tiered") {
           // Disable physics before setting fixed positions
           network.setOptions({ physics: { enabled: false } });
-          applyTieredLayout(currentHorizontalSpacing, 160);
+          clearActiveNodeHighlight();
+          applyTieredLayout(currentHorizontalSpacing, 140);
           network.fit({
             animation: { duration: 500, easingFunction: "easeInOutQuad" },
           });
         } else if (radio.value === "force") {
+          clearActiveNodeHighlight();
           enableForceLayout();
         }
       }
@@ -496,12 +788,11 @@ function setupControls() {
 
   spacingRange.addEventListener("input", () => {
     currentHorizontalSpacing = parseInt(spacingRange.value, 10) || 160;
-    // Only re-apply when in tiered mode
     const tieredSelected = document.querySelector(
       'input[name="layout-mode"][value="tiered"]'
     ).checked;
     if (tieredSelected) {
-      applyTieredLayout(currentHorizontalSpacing, 160);
+      applyTieredLayout(currentHorizontalSpacing, 140);
       network.fit({
         animation: { duration: 400, easingFunction: "easeInOutQuad" },
       });
@@ -513,4 +804,5 @@ function setupControls() {
 // Boot
 // -------------------------------
 window.addEventListener("DOMContentLoaded", initNetwork);
+
 
