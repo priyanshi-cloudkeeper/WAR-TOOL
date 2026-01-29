@@ -285,7 +285,7 @@ from graph_builder import build_graph_data
 # Page Configuration
 # --------------------------
 st.set_page_config(
-    page_title="✨ GCP Live Architecture Visualizer",
+    page_title="✨ GCP Live Architecture Visualizer New",
     layout="wide",
     initial_sidebar_state="expanded",
 )
