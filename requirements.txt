@@ -1,0 +1,5 @@
+flask
+google-cloud-asset
+google-cloud-resource-manager
+google-auth
+streamlit
