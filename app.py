@@ -285,12 +285,12 @@ from graph_builder import build_graph_data
 # Page Configuration
 # --------------------------
 st.set_page_config(
-    page_title="✨ GCP Live Architecture Visualizer New",
+    page_title="✨ GCP Live Architecture Visualizer",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.title("✨ GCP Live Architecture Visualizer")
+st.title("✨ GCP Live Architecture Visualizer New")
 st.markdown("This tool connects **live to GCP** using Cloud Asset Inventory to visualize your infrastructure.")
 
 # --------------------------
